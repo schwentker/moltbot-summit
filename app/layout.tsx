@@ -1,7 +1,9 @@
 import type { Metadata } from 'next';
 import { Inter } from 'next/font/google';
 import './globals.css';
-import EmceePlayer from '@/components/emcee/EmceePlayer';
+// import EmceePlayer from '@/components/emcee/EmceePlayer'; later may add below <QuestionBox />  // <EmceePlayer>
+import QuestionBox from '@/components/interaction/QuestionBox';
+
 
 const inter = Inter({ subsets: ['latin'] });
 
@@ -19,7 +21,8 @@ export default function RootLayout({
     <html lang="en" className="dark">
       <body className={`${inter.className} antialiased`}>
         {children}
-        <EmceePlayer />
+        <QuestionBox />
+      
       </body>
     </html>
   );
