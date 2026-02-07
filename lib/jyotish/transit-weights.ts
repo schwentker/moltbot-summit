@@ -161,8 +161,8 @@ export function calculateAgentWeights(
       baseWeight,
       transitWeight,
       combinedWeight,
-      activeHouses: [...new Set(activeHouses)],
-      planetaryInfluences: [...new Set(planetaryInfluences)],
+      activeHouses: Array.from(new Set(activeHouses)),
+      planetaryInfluences: Array.from(new Set(planetaryInfluences)),
     });
   }
 
@@ -204,6 +204,74 @@ export function selectAgentExcluding(
 ): WeightedAgent | null {
   const filtered = agents.filter(a => !excludeIds.includes(a.agentId));
   return selectWeightedAgent(filtered.length > 0 ? filtered : agents);
+}
+
+// ============================================
+// REPLY AGENT SELECTION
+// ============================================
+
+interface RespondingAgentInfo {
+  id: string;
+  house: number;
+}
+
+/**
+ * Select an agent to reply to another agent's post.
+ * Uses house opposition/trine/square relationships + thematic relevance.
+ */
+export function selectRespondingAgent(
+  agents: WeightedAgent[],
+  originalAgent: RespondingAgentInfo,
+  postContent: string,
+  recentAgentIds: string[],
+  mode?: string
+): WeightedAgent | null {
+  // Exclude the original poster
+  let candidates = agents.filter(a => a.agentId !== originalAgent.id);
+  if (candidates.length === 0) return null;
+
+  // Apply thematic boost from post content
+  candidates = filterByTopic(candidates, postContent);
+
+  // Mode-based house affinity
+  if (mode === 'challenge') {
+    // Prefer agents in opposing houses (1↔7, 2↔8, etc.)
+    const oppositeHouse = ((originalAgent.house + 5) % 12 + 1) as HouseNumber;
+    candidates = candidates.map(a => ({
+      ...a,
+      combinedWeight: a.activeHouses.includes(oppositeHouse)
+        ? a.combinedWeight * 2.0
+        : a.combinedWeight,
+    }));
+  } else if (mode === 'build') {
+    // Prefer agents in trine houses (same element: +4, +8 from original)
+    const trineHouses = [
+      (((originalAgent.house - 1 + 4) % 12) + 1) as HouseNumber,
+      (((originalAgent.house - 1 + 8) % 12) + 1) as HouseNumber,
+    ];
+    candidates = candidates.map(a => ({
+      ...a,
+      combinedWeight: a.activeHouses.some(h => trineHouses.includes(h))
+        ? a.combinedWeight * 1.5
+        : a.combinedWeight,
+    }));
+  } else if (mode === 'question') {
+    // Prefer agents in square houses (tension/inquiry: +3, +9 from original)
+    const squareHouses = [
+      (((originalAgent.house - 1 + 3) % 12) + 1) as HouseNumber,
+      (((originalAgent.house - 1 + 9) % 12) + 1) as HouseNumber,
+    ];
+    candidates = candidates.map(a => ({
+      ...a,
+      combinedWeight: a.activeHouses.some(h => squareHouses.includes(h))
+        ? a.combinedWeight * 1.5
+        : a.combinedWeight,
+    }));
+  }
+
+  // Exclude recent respondents
+  const filtered = candidates.filter(a => !recentAgentIds.includes(a.agentId));
+  return selectWeightedAgent(filtered.length > 0 ? filtered : candidates);
 }
 
 // ============================================

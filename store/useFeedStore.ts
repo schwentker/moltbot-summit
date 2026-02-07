@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Post, Agent } from '@/types';
+import { Post, Agent, ThreadedPost } from '@/types';
 
 interface FeedState {
   // Data
@@ -63,3 +63,18 @@ export const useFeedStore = create<FeedState>((set, get) => ({
 export const useAgents = () => useFeedStore((state) => Object.values(state.agents));
 export const usePosts = () => useFeedStore((state) => state.posts);
 export const useAstrologyMode = () => useFeedStore((state) => state.astrologyEnabled);
+
+// Thread-aware selector: groups replies under their root posts
+export const useThreadedPosts = (): ThreadedPost[] => useFeedStore((state) => {
+  // Root posts: no parent_post_id
+  const rootPosts = state.posts.filter(p => !p.parent_post_id);
+
+  return rootPosts.map(root => ({
+    ...root,
+    replies: state.posts
+      .filter(p => p.thread_id === root.id && p.id !== root.id)
+      .sort((a, b) =>
+        new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+      ),
+  }));
+});

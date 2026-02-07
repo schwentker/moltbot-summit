@@ -51,8 +51,8 @@ export async function POST(req: Request) {
     const agent = agents[Math.floor(Math.random() * agents.length)];
     
     // 4. Parse Skill and Soul
-    const skillDoc = matter(agent.skill.content);
-    const soulDoc = matter(agent.soul.content);
+    const skillDoc = matter((agent as any).skill.content);
+    const soulDoc = matter((agent as any).soul.content);
     
     const skillData = skillDoc.data as SkillFrontmatter;
     const soulData = soulDoc.data as SoulFrontmatter;

@@ -1,23 +1,26 @@
 'use client';
 
-import { useEffect } from 'react';
-import { useFeedStore } from '@/store/useFeedStore';
+import { useEffect, useState } from 'react';
+import { useFeedStore, useThreadedPosts } from '@/store/useFeedStore';
 import { supabase } from '@/lib/supabase';
-import AgentCard from './AgentCard';
+import ThreadView from './ThreadView';
 import { MessageSquare, ArrowBigUp, Share2, Loader2 } from 'lucide-react';
-import { Post } from '@/types';
+import { Post, ThreadedPost } from '@/types';
 
 export default function PostFeed() {
-  const { 
-    posts, 
-    setPosts, 
-    setAgents, 
+  const {
+    posts,
+    setPosts,
+    setAgents,
     getAgent,
     isLoading,
     setLoading,
     error,
-    setError 
+    setError
   } = useFeedStore();
+
+  const threadedPosts = useThreadedPosts();
+  const [replyingTo, setReplyingTo] = useState<string | null>(null);
 
   // 1. Fetch Hybrid Agents from Middleware (One-time on mount)
   useEffect(() => {
@@ -44,12 +47,12 @@ export default function PostFeed() {
     loadAgents();
   }, [setAgents, setLoading, setError]);
 
-  // 2. Poll for Posts (Real-time)
+  // 2. Poll for Posts (Real-time) — now includes thread columns
   useEffect(() => {
     const fetchPosts = async () => {
       const { data, error } = await supabase
         .from('posts')
-        .select('id, event_agent_id, content, metadata, created_at')
+        .select('id, event_agent_id, content, metadata, created_at, parent_post_id, thread_id')
         .order('created_at', { ascending: false })
         .limit(50);
 
@@ -68,13 +71,33 @@ export default function PostFeed() {
     return () => clearInterval(interval);
   }, [setPosts]);
 
+  // Trigger agent reply to a post
+  const handleDiscuss = async (postId: string) => {
+    setReplyingTo(postId);
+    try {
+      const res = await fetch('/api/generate/reply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ parentPostId: postId }),
+      });
+      if (!res.ok) {
+        console.error('Reply generation failed:', res.status);
+      }
+    } catch (e) {
+      console.error('Reply trigger error:', e);
+    } finally {
+      // Keep spinner briefly so user sees the action registered
+      setTimeout(() => setReplyingTo(null), 1500);
+    }
+  };
+
   // Format relative time
   const formatTime = (dateStr: string) => {
     const date = new Date(dateStr);
     const now = new Date();
     const diffMs = now.getTime() - date.getTime();
     const diffMins = Math.floor(diffMs / 60000);
-    
+
     if (diffMins < 1) return 'Now';
     if (diffMins < 60) return `${diffMins}m`;
     const diffHours = Math.floor(diffMins / 60);
@@ -97,10 +120,10 @@ export default function PostFeed() {
     return (
       <div className="text-center py-10">
         <div className="inline-flex items-center gap-2 px-4 py-2 bg-rose-500/10 border border-rose-500/20 rounded-lg text-rose-400 text-sm">
-          <span>⚠️</span>
+          <span>Warning</span>
           <span>{error}</span>
         </div>
-        <button 
+        <button
           onClick={() => window.location.reload()}
           className="block mx-auto mt-4 text-xs text-slate-500 hover:text-slate-300"
         >
@@ -127,13 +150,14 @@ export default function PostFeed() {
         </div>
       )}
 
-      {/* Post list */}
-      {posts.map((post, index) => {
-        const agent = getAgent(post.event_agent_id);
+      {/* Post list — threaded */}
+      {threadedPosts.map((threadPost: ThreadedPost, index: number) => {
+        const agent = getAgent(threadPost.event_agent_id);
+        const isReplying = replyingTo === threadPost.id;
 
         return (
-          <article 
-            key={post.id} 
+          <article
+            key={threadPost.id}
             className="post-card animate-in"
             style={{ animationDelay: `${Math.min(index * 50, 250)}ms` }}
           >
@@ -165,24 +189,29 @@ export default function PostFeed() {
                   </div>
 
                   <span className="text-xs text-slate-600 shrink-0">
-                    {formatTime(post.created_at)}
+                    {formatTime(threadPost.created_at)}
                   </span>
                 </div>
 
                 {/* Post body */}
                 <p className="mt-3 text-slate-300 text-sm leading-relaxed whitespace-pre-wrap">
-                  {post.content}
+                  {threadPost.content}
                 </p>
 
                 {/* Metadata tags */}
-                {post.metadata?.themes && post.metadata.themes.length > 0 && (
+                {threadPost.metadata?.themes && threadPost.metadata.themes.length > 0 && (
                   <div className="mt-3 flex flex-wrap gap-1.5">
-                    {post.metadata.themes.map((theme) => (
+                    {threadPost.metadata.themes.map((theme) => (
                       <span key={theme} className="skill-tag">
                         #{theme}
                       </span>
                     ))}
                   </div>
+                )}
+
+                {/* Thread replies */}
+                {threadPost.replies.length > 0 && (
+                  <ThreadView replies={threadPost.replies} />
                 )}
               </div>
             </div>
@@ -190,15 +219,28 @@ export default function PostFeed() {
             {/* Interaction Bar */}
             <div className="bg-slate-900/50 px-4 py-2 flex items-center gap-6 border-t border-slate-800/50">
               <button className="action-btn group">
-                <ArrowBigUp 
-                  size={18} 
-                  className="group-hover:-translate-y-0.5 group-hover:text-orange-500 transition-all" 
+                <ArrowBigUp
+                  size={18}
+                  className="group-hover:-translate-y-0.5 group-hover:text-orange-500 transition-all"
                 />
                 <span>Vote</span>
               </button>
-              <button className="action-btn">
-                <MessageSquare size={16} />
-                <span>Discuss</span>
+              <button
+                className="action-btn group"
+                onClick={() => handleDiscuss(threadPost.id)}
+                disabled={isReplying}
+              >
+                {isReplying ? (
+                  <Loader2 size={14} className="animate-spin" />
+                ) : (
+                  <MessageSquare size={16} className="group-hover:text-indigo-400 transition-colors" />
+                )}
+                <span>{isReplying ? 'Summoning...' : 'Discuss'}</span>
+                {threadPost.replies.length > 0 && (
+                  <span className="text-[10px] text-slate-500 ml-1">
+                    {threadPost.replies.length}
+                  </span>
+                )}
               </button>
               <button className="action-btn ml-auto">
                 <Share2 size={14} />

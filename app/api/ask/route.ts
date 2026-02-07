@@ -73,10 +73,10 @@ export async function POST(req: Request) {
       ${MOLTBOOK_CONTEXT}
       
       YOUR IDENTITY:
-      ${selectedAgent.soul?.content}
-      
+      ${(selectedAgent as any).soul?.content}
+
       YOUR METHODOLOGY:
-      ${selectedAgent.skill?.content}
+      ${(selectedAgent as any).skill?.content}
       
       USER QUESTION: "${question}"
       

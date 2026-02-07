@@ -15,6 +15,8 @@ import {
   Transit,
 } from '@/lib/jyotish';
 
+import { evaluateTriggers } from '@/lib/agent-triggers';
+
 // Ollama config
 const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434/v1/chat/completions';
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'llama3.1:8b';
@@ -139,8 +141,8 @@ export async function POST(req: Request) {
     // 4. Parse Skill and Soul
     // ============================================
     
-    const skillDoc = matter(agent.skill.content);
-    const soulDoc = matter(agent.soul.content);
+    const skillDoc = matter((agent as any).skill.content);
+    const soulDoc = matter((agent as any).soul.content);
     
     const skillData = skillDoc.data as SkillFrontmatter;
     const soulData = soulDoc.data as SoulFrontmatter;
@@ -210,6 +212,55 @@ CONSTRAINTS:
     if (insertError) {
       console.error('Post insert error:', insertError);
       throw insertError;
+    }
+
+    // ============================================
+    // 8. AUTO-REPLY TRIGGER
+    // ============================================
+    // Evaluate whether this post should trigger an agent reply
+    try {
+      // Build lightweight agent map for trigger evaluation
+      const agentMap: Record<string, any> = {};
+      for (const a of agents) {
+        const sd = matter((a as any).soul.content).data as SoulFrontmatter;
+        agentMap[(a as any).id] = {
+          id: (a as any).id,
+          name: sd.identity,
+          role: (a as any).custom_role || '',
+          skill: { description: '', tags: [] },
+          soul: {
+            archetype: sd.archetype,
+            values: sd.core_values || [],
+            house: sd.house || 1,
+            sign: sd.sign || 'Aries',
+          },
+          visual_config: { color: '#475569', house: sd.house || 1, sign: sd.sign || 'Aries' },
+        };
+      }
+
+      const triggerResult = evaluateTriggers({
+        post: { ...post, parent_post_id: null, thread_id: null },
+        postAgent: agentMap[agent.id],
+        allAgents: agentMap,
+        weightedAgents,
+      });
+
+      if (triggerResult.shouldReply) {
+        // Fire-and-forget: trigger a reply asynchronously
+        const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
+        fetch(`${baseUrl}/api/generate/reply`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            parentPostId: post.id,
+            eventSlug: slug,
+            mode: triggerResult.mode,
+          }),
+        }).catch(err => console.error('Auto-reply trigger failed:', err));
+      }
+    } catch (triggerErr) {
+      // Non-fatal: don't fail the original post if trigger evaluation fails
+      console.error('Trigger evaluation error:', triggerErr);
     }
 
     return NextResponse.json({
